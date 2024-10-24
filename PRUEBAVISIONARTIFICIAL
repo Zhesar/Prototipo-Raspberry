@@ -1,0 +1,45 @@
+import cv2
+import requests
+import torch
+import numpy as np
+
+# URL de la ESP32-CAM
+URL = "http://192.168.1.11/cam-lo.jpg"  # Cambia esta dirección por la IP de tu ESP32-CAM
+
+# Cargar el modelo YOLOv5
+model = torch.hub.load('ultralytics/yolov5', 'custom', path='C:/Users/faceb/PycharmProjects/MASTERCODIGO/VISIONARTIFICIAL 3/yolov5/runs/train/exp/weights/best.pt', force_reload=True)
+
+while True:
+    # Capturar la imagen desde la ESP32-CAM
+    try:
+        response = requests.get(URL)
+        img_array = np.array(bytearray(response.content), dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+        # Realizar la detección
+        results = model(img)
+
+        # Filtrar detecciones con confianza mayor al 90%
+        confident_detections = []
+        for i in range(len(results.xyxy[0])):  # Iterar sobre las detecciones
+            if results.xyxy[0][i][4] > 0.90:  # Verificar el score de confianza
+                confident_detections.append(results.xyxy[0][i])  # Agregar detección confiable
+
+        # Dibujar solo las detecciones confiables en la imagen
+        for *box, conf, cls in confident_detections:
+            x1, y1, x2, y2 = map(int, box)
+            label = f'{model.names[int(cls)]} {conf:.2f}'  # Etiqueta con clase y confianza
+            cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 0), 2)  # Dibuja el rectángulo
+            cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+        # Mostrar la imagen con las detecciones
+        cv2.imshow("Detecciones", img)
+
+        # Salir al presionar 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    except Exception as e:
+        print("Error al capturar imagen:", e)
+
+# Liberar recursos
+cv2.destroyAllWindows()
