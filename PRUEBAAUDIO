@@ -1,0 +1,81 @@
+import os
+import sys
+import wave
+import pyaudio
+from vosk import Model, KaldiRecognizer
+import tkinter as tk
+import json  # Importa el módulo json
+import threading  # Importa el módulo threading
+
+
+# Función para crear y mostrar la interfaz gráfica
+def mostrar_transporte(linea):
+    def abrir_ventana():
+        ventana = tk.Tk()
+        ventana.title("Transporte Seleccionado")
+        mensaje = f"Transporte seleccionado: {linea}"
+        etiqueta = tk.Label(ventana, text=mensaje, font=("Arial", 16))
+        etiqueta.pack(pady=20)
+        boton_cerrar = tk.Button(ventana, text="Cerrar", command=ventana.destroy, font=("Arial", 12))
+        boton_cerrar.pack(pady=10)
+        ventana.mainloop()
+
+    threading.Thread(target=abrir_ventana).start()  # Inicia el hilo
+
+
+# Rutas a tu modelo
+model_path = r"C:\Users\faceb\OneDrive\Escritorio\VOSK\vosk-model-small-es-0.42"
+
+if not os.path.exists(model_path):
+    print("Por favor, descarga el modelo de voz desde https://alphacephei.com/vosk/models y descomprimelo.")
+    sys.exit(1)
+
+# Carga el modelo
+model = Model(model_path)
+
+# Configuración de audio
+samplerate = 16000
+p = pyaudio.PyAudio()
+
+# Abre un flujo de audio
+stream = p.open(format=pyaudio.paInt16,
+                channels=1,
+                rate=samplerate,
+                input=True,
+                frames_per_buffer=8000)
+stream.start_stream()
+
+# Configura el reconocedor
+recognizer = KaldiRecognizer(model, samplerate)
+
+print("Comienza a hablar...")
+
+while True:
+    data = stream.read(4000)
+    if recognizer.AcceptWaveform(data):
+        result = recognizer.Result()
+        result_json = json.loads(result)  # Analiza la cadena JSON
+        texto = result_json.get('text', '')  # Obtiene el texto, si existe
+        print(f"Reconocido: {texto}")  # Imprimir texto reconocido
+
+        # Verificar si se mencionan las líneas
+        if "línea 1" in texto or "línea uno" in texto:
+            print("Línea 1 detectada")  # Para depuración
+            mostrar_transporte("Línea 1")
+        elif "línea 2" in texto or "línea dos" in texto:
+            print("Línea 2 detectada")  # Para depuración
+            mostrar_transporte("Línea 2")
+        elif "línea 3" in texto or "línea tres" in texto:
+            print("Línea 3 detectada")  # Para depuración
+            mostrar_transporte("Línea 3")
+        elif "línea 4" in texto or "línea cuatro" in texto:
+            print("Línea 4 detectada")  # Para depuración
+            mostrar_transporte("Línea 4")
+
+    else:
+        print(recognizer.PartialResult())
+
+# Detiene y cierra el flujo
+stream.stop_stream()
+stream.close()
+p.terminate()
