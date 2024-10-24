@@ -1,2 +1,2 @@
 # Prototipo-Raspberry
-Segunro prototipo + VISION ARTIFICIAL
+Segundo prototipo + VISION ARTIFICIAL
