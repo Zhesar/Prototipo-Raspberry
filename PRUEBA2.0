@@ -1,1 +1,164 @@
 
+import customtkinter as ctk
+import queue
+import vosk
+import json
+import sounddevice as sd
+import numpy as np
+import wave
+
+# Configuración del modelo de Vosk y el micrófono
+model = vosk.Model("/home/viat/Desktop/VOSK/vosk-model-small-es-0.42")
+q = queue.Queue()
+
+# Configuración de los audios
+audios_lineas = {
+    "línea uno": ("/home/viat/Desktop/AUDIOS_VIAT/Linea1.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion1.wav"),
+    "línea dos": ("/home/viat/Desktop/AUDIOS_VIAT/Linea2.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion2.wav"),
+    "línea tres": ("/home/viat/Desktop/AUDIOS_VIAT/Linea3.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion3.wav"),
+    "línea cuatro": ("/home/viat/Desktop/AUDIOS_VIAT/Linea4.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion4.wav"),
+    "línea cinco": ("/home/viat/Desktop/AUDIOS_VIAT/Linea5.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion5.wav"),
+    "línea nueve": ("/home/viat/Desktop/AUDIOS_VIAT/Linea9.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion9.wav"),
+    "línea once": ("/home/viat/Desktop/AUDIOS_VIAT/Linea11.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion11.wav"),
+    "línea veinte valdivia": ("/home/viat/Desktop/AUDIOS_VIAT/Linea20_valdivia.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion20_Valdivia.wav"),
+    "línea veinte niebla": ("/home/viat/Desktop/AUDIOS_VIAT/Linea20_niebla.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion20_Niebla.wav"),
+    "línea veintidos": ("/home/viat/Desktop/AUDIOS_VIAT/Linea22.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion22.wav")
+}
+
+# Audios de bienvenida y de repetición
+audio_bienvenida = "/home/viat/Desktop/AUDIOS_VIAT/Bienvenida.wav"
+audio_repeticion = "/home/viat/Desktop/AUDIOS_VIAT/repeticion_linea.wav"
+
+# Controla si el audio está reproduciéndose
+audio_reproduciendo = False
+
+# Función de reproducción de audio
+def reproducir_audio(ruta_audio):
+    global audio_reproduciendo
+    audio_reproduciendo = True
+    print(f"Iniciando reproducción de: {ruta_audio}")
+    with wave.open(ruta_audio, 'rb') as archivo:
+        frecuencia_muestreo = archivo.getframerate()
+        num_canales = archivo.getnchannels()
+        num_muestras = archivo.getnframes()
+        
+        datos_audio = archivo.readframes(num_muestras)
+        audio_array = np.frombuffer(datos_audio, dtype=np.int16)
+        
+        sd.play(audio_array, samplerate=frecuencia_muestreo)
+        sd.wait()  # Espera a que termine la reproducción
+    print(f"Finalizando reproducción de: {ruta_audio}")
+    audio_reproduciendo = False
+
+# Clase de la interfaz
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.geometry("800x200")  # Aumentar tamaño de la ventana (5 veces más grande)
+        self.title("Detección de transporte")
+        self.linea_actual = None
+        
+        # Establecer el fondo blanco
+        self.configure(bg='white')
+        
+        # Configurar la apariencia de CustomTkinter
+        ctk.set_appearance_mode("light")  # Establece el modo claro
+
+    def mostrar_linea(self, nombre_linea):
+        # Cierra la ventana anterior si existe
+        if self.linea_actual:
+            self.linea_actual.destroy()
+        
+        # Crea una nueva ventana con el nombre de la línea
+        self.linea_actual = ctk.CTkToplevel(self)
+        self.linea_actual.geometry("800x200")
+        self.linea_actual.title(nombre_linea)
+        
+        # Establecer el fondo blanco para la ventana emergente
+        self.linea_actual.configure(bg='white')
+
+        # Ajustar el tamaño de la fuente y el color
+        self.label = ctk.CTkLabel(self.linea_actual, text=nombre_linea, font=("Arial", 100), text_color='black')
+        self.label.pack(pady=50)
+
+        # Iniciar la animación
+        self.mover_texto()
+
+    def mover_texto(self):
+        # Mueve el texto de un lado a otro
+        x = self.label.winfo_x()
+        ancho_ventana = self.linea_actual.winfo_width()
+
+        # Comprobar si el texto ha llegado al límite derecho
+        if x >= ancho_ventana - self.label.winfo_width():
+            # Cambiar dirección
+            self.direccion = -5
+        elif x <= 0:
+            # Cambiar dirección
+            self.direccion = 5
+        else:
+            # Mantener dirección actual
+            self.direccion = self.direccion
+
+        # Mover el texto
+        self.label.place(x=x + self.direccion, y=self.label.winfo_y())
+        self.after(50, self.mover_texto)  # Llama a sí mismo después de 50 ms
+
+# Función para capturar audio en vivo
+def callback(indata, frames, time, status):
+    if status:
+        print(status)
+    if not audio_reproduciendo:  # Solo recibe audio si no se está reproduciendo
+        q.put(bytes(indata))
+
+# Inicia la aplicación
+app = App()
+
+# Reproduce el audio de bienvenida al inicio
+reproducir_audio(audio_bienvenida)
+
+with sd.RawInputStream(samplerate=16000, blocksize=3500, dtype='int16',
+                       channels=1, callback=callback, device=2):
+    rec = vosk.KaldiRecognizer(model, 16000)
+    print("Diga algo...")
+
+    while True:
+        data = q.get()
+        if rec.AcceptWaveform(data):
+            result = json.loads(rec.Result())
+            text = result.get("text", "")
+            print("Texto detectado:", text)
+            
+            # Verifica si el texto contiene alguna de las líneas
+            for linea, (ruta_audio, ruta_confirmacion) in audios_lineas.items():
+                if linea in text and not audio_reproduciendo:
+                    print(f"Reproduciendo {linea}...")
+                    reproducir_audio(ruta_audio)
+                    # No se muestra la línea hasta que se confirme
+                    confirmed = False
+                    
+                    # Espera la confirmación
+                    while not confirmed:
+                        data = q.get()
+                        if rec.AcceptWaveform(data):
+                            result = json.loads(rec.Result())
+                            confirmacion = result.get("text", "")
+                            print("Texto de confirmación:", confirmacion)
+
+                            # Reproduce el audio de confirmación específico si se detecta alguna de las opciones
+                            if confirmacion in ["sí", "correcto", "confirmo", "está bien"] and not audio_reproduciendo:
+                                reproducir_audio(ruta_confirmacion)
+                                app.mostrar_linea(linea)  # Muestra la línea solo si se confirma
+                                confirmed = True  # Cambia a estado confirmado
+                            elif "no" in confirmacion and not audio_reproduciendo:
+                                reproducir_audio(audio_repeticion)
+                                confirmed = True  # Cambia a estado confirmado incluso si se dice no
+
+        else:
+            partial_result = rec.PartialResult()
+            partial_text = json.loads(partial_result).get("partial", "")
+            print("Texto parcial:", partial_text)
+
+        app.update()  # Actualiza la interfaz gráfica
+
+app.mainloop()
