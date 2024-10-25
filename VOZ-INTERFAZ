@@ -1,0 +1,79 @@
+import customtkinter as ctk
+import queue
+import vosk
+import json
+import sounddevice as sd
+
+# Configuración del modelo de Vosk y el micrófono
+model = vosk.Model("/home/viat/Desktop/VOSK/vosk-model-small-es-0.42")  # Ajusta la ruta del modelo
+q = queue.Queue()
+
+# Configura la ventana principal
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.geometry("400x200")
+        self.title("Detección de Líneas")
+        self.linea_actual = None  # Mantiene la línea actualmente mostrada
+
+    def mostrar_linea(self, nombre_linea):
+        # Cierra la ventana anterior si existe
+        if self.linea_actual:
+            self.linea_actual.destroy()
+        
+        # Crea una nueva ventana con el nombre de la línea
+        self.linea_actual = ctk.CTkToplevel(self)
+        self.linea_actual.geometry("400x200")
+        self.linea_actual.title(nombre_linea)
+        label = ctk.CTkLabel(self.linea_actual, text=nombre_linea, font=("Arial", 40))
+        label.pack(pady=50)
+
+# Función para capturar audio en vivo
+def callback(indata, frames, time, status):
+    if status:
+        print(status)
+    q.put(bytes(indata))
+
+# Asocia líneas con sus nombres
+audios_lineas = {
+    "línea uno": "Línea 1",
+    "línea dos": "Línea 2",
+    "línea tres": "Línea 3",
+    "línea cuatro": "Línea 4",
+    "línea cinco": "Línea 5",
+    "línea nueve": "Línea 9",
+    "línea once": "Línea 11",
+    "línea veinte valdivia": "Línea 20 Valdivia",
+    "línea veinte niebla": "Línea 20 Niebla",
+    "línea veintidos": "Línea 22"
+}
+
+app = App()
+
+with sd.RawInputStream(samplerate=16000, blocksize=3500, dtype='int16',
+                       channels=1, callback=callback, device=2):
+    rec = vosk.KaldiRecognizer(model, 16000)
+    print("Diga algo...")
+
+    while True:
+        data = q.get()
+        if rec.AcceptWaveform(data):
+            result = json.loads(rec.Result())
+            text = result.get("text", "")
+            print("Texto detectado:", text)
+            
+            # Revisa si el texto contiene alguna de las líneas
+            for linea, nombre_linea in audios_lineas.items():
+                if linea in text:
+                    print(f"Mostrando interfaz para {nombre_linea}...")
+                    app.mostrar_linea(nombre_linea)
+                    break  # Evita que procese más líneas
+
+        else:
+            partial_result = rec.PartialResult()
+            partial_text = json.loads(partial_result).get("partial", "")
+            print("Texto parcial:", partial_text)
+
+        app.update()  # Actualiza la interfaz gráfica
+
+app.mainloop()
