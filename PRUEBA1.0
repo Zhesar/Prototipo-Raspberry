@@ -1,0 +1,101 @@
+import customtkinter as ctk
+import queue
+import vosk
+import json
+import sounddevice as sd
+import numpy as np
+import wave
+import time
+
+# Configuración del modelo de Vosk y el micrófono
+model = vosk.Model("/home/viat/Desktop/VOSK/vosk-model-small-es-0.42")  # Ajusta la ruta del modelo
+q = queue.Queue()
+
+# Configura la ventana principal
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.geometry("400x200")
+        self.title("Detección de Líneas")
+        self.linea_actual = None  # Mantiene la línea actualmente mostrada
+        self.audio_reproduciendo = False  # Controla si el audio está reproduciéndose
+
+    def mostrar_linea(self, nombre_linea):
+        # Cierra la ventana anterior si existe
+        if self.linea_actual:
+            self.linea_actual.destroy()
+        
+        # Crea una nueva ventana con el nombre de la línea
+        self.linea_actual = ctk.CTkToplevel(self)
+        self.linea_actual.geometry("400x200")
+        self.linea_actual.title(nombre_linea)
+        label = ctk.CTkLabel(self.linea_actual, text=nombre_linea, font=("Arial", 40))
+        label.pack(pady=50)
+
+    def reproducir_audio(self, ruta_audio):
+        self.audio_reproduciendo = True  # Indica que un audio está en reproducción
+        print(f"Iniciando reproducción de: {ruta_audio}")  # Mensaje de depuración
+        with wave.open(ruta_audio, 'rb') as archivo:
+            frecuencia_muestreo = archivo.getframerate()
+            num_canales = archivo.getnchannels()
+            num_muestras = archivo.getnframes()
+            
+            datos_audio = archivo.readframes(num_muestras)
+            audio_array = np.frombuffer(datos_audio, dtype=np.int16)
+            
+            sd.play(audio_array, samplerate=frecuencia_muestreo)
+            sd.wait()  # Espera a que termine la reproducción
+        print(f"Finalizando reproducción de: {ruta_audio}")  # Mensaje de depuración
+        self.audio_reproduciendo = False  # Restablece el estado después de la reproducción
+
+# Asocia líneas con sus archivos de audio
+audios_lineas = {
+    "línea uno": "/home/viat/Desktop/AUDIOS_VIAT/Linea1.wav",
+    "línea dos": "/home/viat/Desktop/AUDIOS_VIAT/Linea2.wav",
+    "línea tres": "/home/viat/Desktop/AUDIOS_VIAT/Linea3.wav",
+    "línea cuatro": "/home/viat/Desktop/AUDIOS_VIAT/Linea4.wav",
+    "línea cinco": "/home/viat/Desktop/AUDIOS_VIAT/Linea5.wav",
+    "línea nueve": "/home/viat/Desktop/AUDIOS_VIAT/Linea9.wav",
+    "línea once": "/home/viat/Desktop/AUDIOS_VIAT/Linea11.wav",
+    "línea veinte valdivia": "/home/viat/Desktop/AUDIOS_VIAT/Linea20_valdivia.wav",
+    "línea veinte niebla": "/home/viat/Desktop/AUDIOS_VIAT/Linea20_niebla.wav",
+    "línea veintidos": "/home/viat/Desktop/AUDIOS_VIAT/Linea22.wav"
+}
+
+app = App()
+
+# Función para capturar audio en vivo
+def callback(indata, frames, time, status):
+    if status:
+        print(status)
+    q.put(bytes(indata))
+
+# Inicia la captura de audio en vivo y el reconocimiento
+with sd.RawInputStream(samplerate=16000, blocksize=3500, dtype='int16',
+                       channels=1, callback=callback, device=2):
+    rec = vosk.KaldiRecognizer(model, 16000)
+    print("Diga algo...")
+
+    while True:
+        data = q.get()
+        if rec.AcceptWaveform(data):
+            result = json.loads(rec.Result())
+            text = result.get("text", "")
+            print("Texto detectado:", text)
+            
+            # Verifica si el texto contiene alguna de las líneas
+            for linea, ruta_audio in audios_lineas.items():
+                if linea in text and not app.audio_reproduciendo:
+                    print(f"Reproduciendo {linea}...")
+                    app.mostrar_linea(linea)  # Muestra la línea en la interfaz
+                    app.reproducir_audio(ruta_audio)  # Reproduce el audio
+                    break  # Evita que procese más líneas hasta que termine el audio
+
+        else:
+            partial_result = rec.PartialResult()
+            partial_text = json.loads(partial_result).get("partial", "")
+            print("Texto parcial:", partial_text)
+
+        app.update()  # Actualiza la interfaz gráfica
+
+app.mainloop()
