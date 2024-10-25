@@ -1,0 +1,16 @@
+import sounddevice as sd
+import numpy as np
+import wave
+
+def reproducir_audio(ruta_audio):
+    with wave.open(ruta_audio, 'rb') as archivo:
+        frecuencia_muestreo = archivo.getframerate()
+        num_muestras = archivo.getnframes()
+        datos_audio = archivo.readframes(num_muestras)
+        audio_array = np.frombuffer(datos_audio, dtype=np.int16)
+        
+        sd.play(audio_array, samplerate=frecuencia_muestreo)
+        sd.wait()  # Espera a que termine la reproducción
+
+# Prueba de reproducción directa
+reproducir_audio("/home/viat/Desktop/AUDIOS_VIAT/Linea1.wav")
