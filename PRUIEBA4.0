@@ -1,0 +1,241 @@
+import customtkinter as ctk
+import queue
+import vosk
+import json
+import sounddevice as sd
+import numpy as np
+import wave
+import threading
+import datetime
+import serial 
+import time
+from adafruit_pn532.uart import PN532_UART
+
+# Configuración del modelo de Vosk y el micrófono
+model = vosk.Model("/home/viat/Desktop/VOSK/vosk-model-small-es-0.42")
+q = queue.Queue()
+
+# Configuración del puerto serial para el NFC
+uart = serial.Serial("/dev/serial0", baudrate=115200, timeout=0.5)
+nfc = PN532_UART(uart)
+
+# Función para cargar los UIDs permitidos desde un archivo de texto
+def cargar_uids_permitidos():
+    with open("permitidos.txt", "r") as file:
+        return {line.strip() for line in file}
+
+uids_permitidos = cargar_uids_permitidos()
+
+# Configuración de los audios
+audios_lineas = {
+    "línea uno": ("/home/viat/Desktop/AUDIOS_VIAT/Linea1.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion1.wav"),
+    "línea dos": ("/home/viat/Desktop/AUDIOS_VIAT/Linea2.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion2.wav"),
+    "línea tres": ("/home/viat/Desktop/AUDIOS_VIAT/Linea3.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion3.wav"),
+    "línea cuatro": ("/home/viat/Desktop/AUDIOS_VIAT/Linea4.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion4.wav"),
+    "línea cinco": ("/home/viat/Desktop/AUDIOS_VIAT/Linea5.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion5.wav"),
+    "línea nueve": ("/home/viat/Desktop/AUDIOS_VIAT/Linea9.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion9.wav"),
+    "línea once": ("/home/viat/Desktop/AUDIOS_VIAT/Linea11.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion11.wav"),
+    "línea veinte regional": ("/home/viat/Desktop/AUDIOS_VIAT/Linea20_valdivia.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion20_Valdivia.wav"),
+    "línea veinte niebla": ("/home/viat/Desktop/AUDIOS_VIAT/Linea20_niebla.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion20_Niebla.wav"),
+    "línea veintidós": ("/home/viat/Desktop/AUDIOS_VIAT/Linea22.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion22.wav")
+}
+
+# Audios de bienvenida y de repetición
+audio_bienvenida = "/home/viat/Desktop/AUDIOS_VIAT/Bienvenida.wav"
+audio_repeticion = "/home/viat/Desktop/AUDIOS_VIAT/repeticion_linea.wav"
+audio_seleccion_20 = "/home/viat/Desktop/AUDIOS_VIAT/seleccion20.wav"
+
+# Controla si el audio está reproduciéndose
+audio_reproduciendo = False
+
+# Función de reproducción de audio
+def reproducir_audio(ruta_audio):
+    global audio_reproduciendo
+    audio_reproduciendo = True
+    print(f"Iniciando reproducción de: {ruta_audio}")
+    with wave.open(ruta_audio, 'rb') as archivo:
+        frecuencia_muestreo = archivo.getframerate()
+        num_canales = archivo.getnchannels()
+        num_muestras = archivo.getnframes()
+        
+        datos_audio = archivo.readframes(num_muestras)
+        audio_array = np.frombuffer(datos_audio, dtype=np.int16)
+        
+        sd.play(audio_array, samplerate=frecuencia_muestreo)
+        sd.wait()  # Espera a que termine la reproducción
+    print(f"Finalizando reproducción de: {ruta_audio}")
+    audio_reproduciendo = False
+
+# Clase de la interfaz
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.geometry("1680x1050")  # Aumentar tamaño de la ventana
+        self.title("Detección de transporte")
+        self.linea_actual = None
+        self.nfc_activado = False
+        
+        # Establecer el fondo blanco
+        self.configure(bg='white')
+        
+        # Configurar la apariencia de CustomTkinter
+        ctk.set_appearance_mode("light")  # Establece el modo claro
+
+        # Label para la hora y el día
+        self.hora_label = ctk.CTkLabel(self, text="", font=("Arial", 50), text_color='black')
+        self.hora_label.pack(pady=50)
+
+        # Label para la línea
+        self.linea_label = ctk.CTkLabel(self, text="", font=("Arial", 350), text_color='black')
+        self.linea_label.pack(pady=(50, 0))
+
+        # Label para el subtítulo (con tamaño de fuente más pequeño)
+        self.subtitulo_label = ctk.CTkLabel(self, text="", font=("Arial", 100), text_color='black')
+        self.subtitulo_label.pack(pady=(0, 100))
+
+        self.actualizar_hora()  # Inicia la actualización de la hora
+
+    def mostrar_linea(self, nombre_linea):
+        # Actualiza la línea confirmada, dividiendo en línea principal y subtítulo si es necesario
+        traducciones = {
+            "línea uno": ("Línea 1", "Collico"),
+            "línea dos": ("Línea 2", "Las Animas"),
+            "línea tres": ("Línea 3", ""),
+            "línea cuatro": ("Línea 4", ""),
+            "línea cinco": ("Línea 5", "Corvi"),
+            "línea nueve": ("Línea 9", ""),
+            "línea once": ("Línea 11", "San pedro"),
+            "línea veinte regional": ("Línea 20", "Regional"),
+            "línea veinte niebla": ("Línea 20", "Niebla"),
+            "línea veintidós": ("Línea 22", "")
+        }
+        texto_principal, texto_subtitulo = traducciones.get(nombre_linea, (nombre_linea, ""))
+        self.linea_label.configure(text=texto_principal)
+        self.subtitulo_label.configure(text=texto_subtitulo)
+
+
+    def actualizar_hora(self):
+        # Actualiza la hora y el día en el label
+        now = datetime.datetime.now()
+        self.hora_label.configure(text=now.strftime("%Y-%m-%d %H:%M:%S"))
+        self.after(1000, self.actualizar_hora)  # Actualiza cada segundo
+
+    def activar_por_nfc(self):
+        self.nfc_activado = True
+        self.linea_label.configure(text="")
+        self.subtitulo_label.configure(text="")
+        reproducir_audio(audio_bienvenida)
+
+# Inicializa la interfaz
+app = App()
+
+# Función para capturar audio en vivo
+def callback(indata, frames, time, status):
+    if status:
+        print(status)
+    if not audio_reproduciendo:  # Solo recibe audio si no se está reproduciendo
+        q.put(bytes(indata))
+
+# Función para manejar el reconocimiento de voz
+audio_repeticion_seleccion = "/home/viat/Desktop/AUDIOS_VIAT/repeticion_seleccion.wav" 
+
+# Función para manejar el reconocimiento de voz
+def reconocer_voz():
+    global app
+    with sd.RawInputStream(samplerate=16000, blocksize=3500, dtype='int16',
+                           channels=1, callback=callback, device=2):
+        rec = vosk.KaldiRecognizer(model, 16000)
+        print("Diga algo...")
+
+        while True:
+            data = q.get()
+            if rec.AcceptWaveform(data):
+                result = json.loads(rec.Result())
+                text = result.get("text", "")
+                print("Texto detectado:", text)
+
+                if app.nfc_activado:  # Solo continúa si NFC está activado
+                    # Verifica si el texto contiene alguna de las líneas de transporte conocidas
+                    if "línea veinte" in text and not audio_reproduciendo:
+                        reproducir_audio(audio_seleccion_20)
+                        # Espera la confirmación entre Valdivia o Niebla o volver atrás
+                        confirmed = False
+                        while not confirmed:
+                            data = q.get()
+                            if rec.AcceptWaveform(data):
+                                result = json.loads(rec.Result())
+                                confirmacion = result.get("text", "")
+                                print("Texto de confirmación:", confirmacion)
+
+                                if "regional" in confirmacion and not audio_reproduciendo:
+                                    reproducir_audio(audios_lineas["línea veinte regional"][1])
+                                    app.mostrar_linea("línea veinte regional")
+                                    confirmed = True
+                                    app.nfc_activado = False  # Reinicia el ciclo
+                                elif "niebla" in confirmacion and not audio_reproduciendo:
+                                    reproducir_audio(audios_lineas["línea veinte niebla"][1])
+                                    app.mostrar_linea("línea veinte niebla")
+                                    confirmed = True
+                                    app.nfc_activado = False  # Reinicia el ciclo
+                                elif "no" in confirmacion and not audio_reproduciendo:
+                                    # Regresa a la selección de líneas sin reiniciar el ciclo NFC
+                                    reproducir_audio(audio_repeticion)
+                                    confirmed = True
+                                    app.linea_label.configure(text="")  # Limpia la línea mostrada
+                    else:
+                        # Verifica si el texto contiene una línea de transporte existente
+                        linea_detectada = False
+                        for linea, (ruta_audio, ruta_confirmacion) in audios_lineas.items():
+                            if linea in text and not audio_reproduciendo:
+                                linea_detectada = True
+                                reproducir_audio(ruta_audio)
+                                confirmed = False
+
+                                # Espera la confirmación
+                                while not confirmed:
+                                    data = q.get()
+                                    if rec.AcceptWaveform(data):
+                                        result = json.loads(rec.Result())
+                                        confirmacion = result.get("text", "")
+                                        print("Texto de confirmación:", confirmacion)
+
+                                        if "sí" in confirmacion and not audio_reproduciendo:
+                                            reproducir_audio(ruta_confirmacion)
+                                            app.mostrar_linea(linea)
+                                            confirmed = True
+                                            app.nfc_activado = False  # Reinicia el ciclo
+                                        elif "no" in confirmacion and not audio_reproduciendo:
+                                            reproducir_audio(audio_repeticion)
+                                            confirmed = True
+
+                        # Si detecta la palabra "línea" pero ninguna de las líneas válidas, reproduce el audio de repetición
+                        if "línea" in text and not linea_detectada and not audio_reproduciendo:
+                            reproducir_audio(audio_repeticion_seleccion)
+
+
+# Hilo de lectura NFC
+def leer_nfc():
+    global app
+    while True:
+        # Espera la detección de una tarjeta
+        uid = nfc.read_passive_target(timeout=0.5)
+        if uid:
+            uid_hex = ''.join([f"{i:02X}" for i in uid])
+            print("Tarjeta NFC detectada con UID:", uid_hex)
+            
+            # Verifica si el UID detectado está en la lista de permitidos
+            if uid_hex in uids_permitidos:
+                print("Acceso permitido")
+                app.activar_por_nfc()  # Activa el ciclo del sistema NFC
+            else:
+                print("Acceso denegado")
+
+# Iniciar el hilo de reconocimiento de voz y de NFC
+hilo_reconocimiento = threading.Thread(target=reconocer_voz)
+hilo_reconocimiento.start()
+
+hilo_nfc = threading.Thread(target=leer_nfc)
+hilo_nfc.start()
+
+# Iniciar la aplicación
+app.mainloop()
