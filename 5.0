@@ -1,5 +1,9 @@
+#!/usr/bin/env python3
+
 import socket
+import sys
 import os
+import subprocess
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
@@ -13,9 +17,10 @@ import datetime
 import serial
 import time
 from adafruit_pn532.uart import PN532_UART
+from scipy.signal import butter, filtfilt
 
 # Configuración de la carpeta de audios
-audio_folder = '/home/viat/Desktop/AUDIOS_VIAT'
+audio_folder = '/home/viat/VIAT/AUDIOS'
 audio_mapping = {
     "línea uno": "linea1_aviso.wav",
     "línea dos": "linea2_aviso.wav",
@@ -30,20 +35,20 @@ audio_mapping = {
 }
 
 audios_lineas = {
-    "línea uno": ("/home/viat/Desktop/AUDIOS_VIAT/Linea1.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion1.wav"),
-    "línea dos": ("/home/viat/Desktop/AUDIOS_VIAT/Linea2.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion2.wav"),
-    "línea tres": ("/home/viat/Desktop/AUDIOS_VIAT/Linea3.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion3.wav"),
-    "línea cuatro": ("/home/viat/Desktop/AUDIOS_VIAT/Linea4.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion4.wav"),
-    "línea cinco": ("/home/viat/Desktop/AUDIOS_VIAT/Linea5.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion5.wav"),
-    "línea nueve": ("/home/viat/Desktop/AUDIOS_VIAT/Linea9.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion9.wav"),
-    "línea once": ("/home/viat/Desktop/AUDIOS_VIAT/Linea11.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion11.wav"),
-    "línea veinte regional": ("/home/viat/Desktop/AUDIOS_VIAT/Linea20_valdivia.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion20_Valdivia.wav"),
-    "línea veinte niebla": ("/home/viat/Desktop/AUDIOS_VIAT/Linea20_niebla.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion20_Niebla.wav"),
-    "línea veintidós": ("/home/viat/Desktop/AUDIOS_VIAT/Linea22.wav", "/home/viat/Desktop/AUDIOS_VIAT/Confirmacion22.wav")
+    "línea uno": ("/home/viat/VIAT/AUDIOS/Linea1.wav", "/home/viat/VIAT/AUDIOS/Confirmacion1.wav"),
+    "línea dos": ("/home/viat/VIAT/AUDIOS/Linea2.wav", "/home/viat/VIAT/AUDIOS/Confirmacion2.wav"),
+    "línea tres": ("/home/viat/VIAT/AUDIOS/Linea3.wav", "/home/viat/VIAT/AUDIOS/Confirmacion3.wav"),
+    "línea cuatro": ("/home/viat/VIAT/AUDIOS/Linea4.wav", "/home/viat/VIAT/AUDIOS/Confirmacion4.wav"),
+    "línea cinco": ("/home/viat/VIAT/AUDIOS/Linea5.wav", "/home/viat/VIAT/AUDIOS/Confirmacion5.wav"),
+    "línea nueve": ("/home/viat/VIAT/AUDIOS/Linea9.wav", "/home/viat/VIAT/AUDIOS/Confirmacion9.wav"),
+    "línea once": ("/home/viat/VIAT/AUDIOS/Linea11.wav", "/home/viat/VIAT/AUDIOS/Confirmacion11.wav"),
+    "línea veinte regional": ("/home/viat/VIAT/AUDIOS/Linea20_valdivia.wav", "/home/viat/VIAT/AUDIOS/Confirmacion20_Valdivia.wav"),
+    "línea veinte niebla": ("/home/viat/VIAT/AUDIOS/Linea20_niebla.wav", "/home/viat/VIAT/AUDIOS/Confirmacion20_Niebla.wav"),
+    "línea veintidós": ("/home/viat/VIAT/AUDIOS/Linea22.wav", "/home/viat/VIAT/AUDIOS/Confirmacion22.wav")
 }
 
 # Configuración del modelo de Vosk y el micrófono
-model = vosk.Model("/home/viat/Desktop/VOSK/vosk-model-small-es-0.42")
+model = vosk.Model("/home/viat/VIAT/vosk-model-small-es-0.42")
 q = queue.Queue()
 
 # Configuración del puerto serial para el NFC
@@ -52,16 +57,16 @@ nfc = PN532_UART(uart)
 
 # Función para cargar los UIDs permitidos desde un archivo de texto
 def cargar_uids_permitidos():
-    with open("permitidos.txt", "r") as file:
+    with open("/home/viat/VIAT/Programacion/permitidos.txt", "r") as file:
         return {line.strip() for line in file}
 
 uids_permitidos = cargar_uids_permitidos()
 
 # Audios de bienvenida y de repetición
-audio_bienvenida = "/home/viat/Desktop/AUDIOS_VIAT/Bienvenida.wav"
-audio_repeticion = "/home/viat/Desktop/AUDIOS_VIAT/repeticion_linea.wav"
-audio_seleccion_20 = "/home/viat/Desktop/AUDIOS_VIAT/seleccion20.wav"
-audio_repeticion_seleccion = "/home/viat/Desktop/AUDIOS_VIAT/repeticion_seleccion.wav"
+audio_bienvenida = "/home/viat/VIAT/AUDIOS/Bienvenida.wav"
+audio_repeticion = "/home/viat/VIAT/AUDIOS/repeticion_seleccion.wav"
+audio_seleccion_20 = "/home/viat/VIAT/AUDIOS/seleccion20.wav"
+audio_repeticion_seleccion = "/home/viat/VIAT/AUDIOS/repeticion_linea.wav"
 
 # Controla si el audio está reproduciéndose
 audio_reproduciendo = False
@@ -70,30 +75,48 @@ linea_confirmada = None  # Línea confirmada para reproducir el audio
 # Añadir una variable global para asegurarse de que solo se reproduce una vez
 detected_once = False
 
-# Función de reproducción de audio optimizada
-def reproducir_audio(ruta_audio):
-    global audio_reproduciendo
-    audio_reproduciendo = True
-    print(f"Iniciando reproducción de: {ruta_audio}")
+# Define un factor de velocidad global 
+FACTOR_VELOCIDAD_GLOBAL = 1.0
+def cambiar_velocidad_audio(ruta_audio, factor_velocidad): 
+    try: 
+        data, samplerate = sf.read(ruta_audio) 
+        nuevo_samplerate = int(samplerate * factor_velocidad) 
+        sd.play(data, samplerate=nuevo_samplerate, blocksize=1024, latency='low') 
+        sd.wait() 
+    except Exception as e: 
+         print(f"Error al cambiar la velocidad del audio: {e}")
 
-    try:
-        with wave.open(ruta_audio, 'rb') as archivo:
-            frecuencia_muestreo = archivo.getframerate()
-            num_canales = archivo.getnchannels()
-            num_muestras = archivo.getnframes()
+# Función para aplicar un filtro de paso alto para eliminar ruido de baja frecuencia 
+def highpass_filter(data, samplerate, cutoff=300): 
+    nyquist = 0.5 * samplerate 
+    normal_cutoff = cutoff / nyquist 
+    b, a = butter(1, normal_cutoff, btype='high', analog=False) 
+    y = filtfilt(b, a, data) 
+    return y
 
-            datos_audio = archivo.readframes(num_muestras)
-            audio_array = np.frombuffer(datos_audio, dtype=np.int16)
-
-            sd.play(audio_array, samplerate=frecuencia_muestreo, blocksize=1024, latency='low')
-            sd.wait()  # Espera a que termine la reproducción
-
-        print(f"Finalizando reproducción de: {ruta_audio}")
-    except Exception as e:
-        print(f"Error al reproducir el audio {ruta_audio}: {e}")
-    finally:
-        audio_reproduciendo = False
-
+# Función de reproducción de audio optimizada 
+def reproducir_audio(ruta_audio, factor_velocidad=FACTOR_VELOCIDAD_GLOBAL): 
+    global audio_reproduciendo 
+    audio_reproduciendo = True 
+    print(f"Iniciando reproducción de: {ruta_audio} a velocidad: {factor_velocidad}") 
+    try: 
+        if factor_velocidad != 1.0: 
+            cambiar_velocidad_audio(ruta_audio, factor_velocidad) 
+        else: 
+                with wave.open(ruta_audio, 'rb') as archivo: 
+                    frecuencia_muestreo = archivo.getframerate() 
+                    num_canales = archivo.getnchannels() 
+                    num_muestras = archivo.getnframes() 
+                    datos_audio = archivo.readframes(num_muestras) 
+                    audio_array = np.frombuffer(datos_audio, dtype=np.int16) 
+                    sd.play(audio_array, samplerate=frecuencia_muestreo, blocksize=1024, latency='low') 
+                    sd.wait() # Espera a que termine la reproducción 
+                    
+        print(f"Finalizando reproducción de: {ruta_audio}") 
+    except Exception as e: 
+        print(f"Error al reproducir el audio {ruta_audio}: {e}") 
+    finally: audio_reproduciendo = False
+    
 # Clase de la interfaz
 class App(ctk.CTk):
     def __init__(self):
@@ -108,21 +131,21 @@ class App(ctk.CTk):
         self.configure(bg='white')
 
         # Configurar la apariencia de CustomTkinter
-        ctk.set_appearance_mode("light")  # Establece el modo claro
+        ctk.set_appearance_mode("light")
 
         # Label para la hora y el día
         self.hora_label = ctk.CTkLabel(self, text="", font=("Arial", 50), text_color='black')
         self.hora_label.pack(pady=50)
 
         # Label para la línea
-        self.linea_label = ctk.CTkLabel(self, text="", font=("Arial", 350), text_color='black')
+        self.linea_label = ctk.CTkLabel(self, text="", font=("Arial", 400), text_color='black')
         self.linea_label.pack(pady=(50, 0))
 
-        # Label para el subtítulo (con tamaño de fuente más pequeño)
-        self.subtitulo_label = ctk.CTkLabel(self, text="", font=("Arial", 100), text_color='black')
+        # Label para el subtítulo
+        self.subtitulo_label = ctk.CTkLabel(self, text="", font=("Arial", 150), text_color='black')
         self.subtitulo_label.pack(pady=(0, 100))
 
-        self.actualizar_hora()  # Inicia la actualización de la hora
+        self.actualizar_hora() 
 
     def mostrar_linea(self, nombre_linea):
         global linea_confirmada
@@ -148,40 +171,30 @@ class App(ctk.CTk):
          self.hora_label.configure(text=now.strftime("%Y-%m-%d %H:%M"))
          self.after(60000, self.actualizar_hora)  # Actualiza cada 60 segundos
 
-    def limpiar_pantalla():
-        self.linea_label.configure(text="")
-        self.subtitulo_label.configure(text="")
-        self.nfc_activado = False
-        global linea_confirmada, detected_once
-        linea_confirmada = None
-        detected_once = False
-        reproducir_audio("/home/viat/Desktop/AUDIOS_VIAT/gracias.wav")
+    def resetear_ciclo(self): 
+        global detected_once, linea_confirmada 
+        print("Reseteando ciclo por inactividad...") 
+        self.linea_label.configure(text="") 
+        self.subtitulo_label.configure(text="") 
+        self.nfc_activado = False 
+        linea_confirmada = None 
+        detected_once = False 
+        reproducir_audio("/home/viat/VIAT/AUDIOS/gracias.wav")
         if self.temporizador_reset:
             self.after_cancel(self.temporizador_reset)  # Cancelar el temporizador si existía
-        resetear_ciclo()  # Reiniciar el ciclo después de limpiar la pantalla
-
-    def resetear_ciclo(self):
-        global detected_once, linea_confirmada
-        print("Reseteando ciclo por inactividad...")
-        self.linea_label.configure(text="")
-        self.subtitulo_label.configure(text="")
-        self.nfc_activado = False
-        linea_confirmada = None
-        detected_once = False
-        reproducir_audio("/home/viat/Desktop/AUDIOS_VIAT/gracias.wav")
 
     def activar_por_nfc(self):
         global detected_once
-        detected_once = False  # Reiniciar la detección
+        linea_confirmada = None
+        detected_once = False # Reiniciar la detección
         self.nfc_activado = True
         self.linea_label.configure(text="")
         self.subtitulo_label.configure(text="")
         reproducir_audio(audio_bienvenida)
-        if self.temporizador_reset:
-            self.after_cancel(self.temporizador_reset)  # Cancelar cualquier temporizador previo
-        self.temporizador_reset = self.after(60000, self.resetear_ciclo)  # Iniciar el nuevo temporizador
-
-
+        if app.temporizador_reset: 
+            app.after_cancel(app.temporizador_reset) # Cancelar cualquier temporizador previo 
+        app.temporizador_reset = app.after(180000, app.resetear_ciclo) # Iniciar el nuevo temporizado
+        
 # Ajustar la función de reconocimiento de voz
 def callback(indata, frames, time, status):
     if status:
@@ -191,10 +204,10 @@ def callback(indata, frames, time, status):
 
 # Función para manejar el reconocimiento de voz
 def reconocer_voz():
-    global app, detected_once
-    with sd.RawInputStream(samplerate=16000, blocksize=3500, dtype='int16',
+    global app, detected_once, linea_confirmada
+    with sd.RawInputStream(samplerate=44100, blocksize=3500, dtype='int16',
                            channels=1, callback=callback, device=2):
-        rec = vosk.KaldiRecognizer(model, 16000)
+        rec = vosk.KaldiRecognizer(model, 44100)
         print("Diga algo...")
 
         while True:
@@ -206,47 +219,71 @@ def reconocer_voz():
 
                 # diccionario palabras claves
                 palabra_clave_a_audio = {
-                    "visión artificial": "/home/viat/Desktop/AUDIOS_VIAT/VIAT.wav",
-                    "proceso": "/home/viat/Desktop/AUDIOS_VIAT/proceso.wav",
-                    "ayuda": "/home/viat/Desktop/AUDIOS_VIAT/ayuda.wav",
-                    "paradero": "/home/viat/Desktop/AUDIOS_VIAT/paradero.wav",
-                    "in formación": "/home/viat/Desktop/AUDIOS_VIAT/informacion.wav",
-                    "recorrido línea uno": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea1.wav",
-                    "recorrido micro uno": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea1.wav",
-                    "recorrido línea dos": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea2.wav",
-                    "recorrido micro dos": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea2.wav",
-                    "recorrido línea tres": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea3.wav",
-                    "recorrido micro tres": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea3.wav",
-                    "recorrido línea cuatro": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea4.wav",
-                    "recorrido micro cuatro": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea4.wav",
-                    "recorrido línea cinco": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea5.wav",
-                    "recorrido micro cinco": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea5.wav",
-                    "recorrido línea nueve": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea9.wav",
-                    "recorrido micro nueve": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea9.wav",
-                    "recorrido línea once": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea11.wav",
-                    "recorrido micro once": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea11.wav",
-                    "recorrido línea veinte niebla": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea20niebla.wav",
-                    "recorrido micro veinte niebla": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea20niebla.wav",
-                    "recorrido línea veinte regional": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea20regional.wav",
-                    "recorrido micro veinte regional": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea20regional.wav",
-                    "recorrido línea veintidós": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea22.wav",
-                    "recorrido micro veintidós": "/home/viat/Desktop/AUDIOS_VIAT/recorrido_linea22.wav"
+                    "comando salud": "/home/viat/VIAT/AUDIOS/salud.wav",
+                    "centro comunitario de salud barrios bajos": "/home/viat/VIAT/AUDIOS/centrobarriosbajos.wav",
+                    "centro comunitario de salud pablo neruda": "/home/viat/VIAT/AUDIOS/centropabloneruda.wav",
+                    "centro comunitario de salud guacamayo": "/home/viat/VIAT/AUDIOS/centroguacamayo.wav",
+                    "centro de salud familiar han casilla": "/home/viat/VIAT/AUDIOS/centroangachilla.wav",
+                    "centro de salud familiar las animas": "/home/viat/VIAT/AUDIOS/centroanimas.wav",
+                    "centro de salud familiar jorge sabbath": "/home/viat/VIAT/AUDIOS/centrojorge.wav",
+                    "servicio de atención": "/home/viat/VIAT/AUDIOS/sarbarriosbajos.wav",
+                    "hospital regional": "/home/viat/VIAT/AUDIOS/hospital.wav",
+                    "tele": "/home/viat/VIAT/AUDIOS/teleton.wav",
+                    "parques": "/home/viat/VIAT/AUDIOS/parques.wav",
+                    "parque kramer": "/home/viat/VIAT/AUDIOS/parquekramer.wav",
+                    "parque urbano": "/home/viat/VIAT/AUDIOS/parqueurbano.wav",
+                    "parque isla teja": "/home/viat/VIAT/AUDIOS/parqueislateja.wav",
+                    "parque los laureles": "/home/viat/VIAT/AUDIOS/laureles.wav",
+                    "lugares": "/home/viat/VIAT/AUDIOS/lugares.wav",
+                    "mercado fluvial": "/home/viat/VIAT/AUDIOS/mercadofluvial.wav",
+                    "casino": "/home/viat/VIAT/AUDIOS/casino.wav",
+                    "plaza de la república": "/home/viat/VIAT/AUDIOS/plazarepublica.wav",
+                    "terminal de buses": "/home/viat/VIAT/AUDIOS/terminalbuses.wav",
+                    "universidades": "/home/viat/VIAT/AUDIOS/universidades.wav",
+                    "ina cap": "/home/viat/VIAT/AUDIOS/inacap.wav",
+                    "universidad austral miraflores": "/home/viat/VIAT/AUDIOS/campusmiraflores.wav",
+                    "universidad austral isla teja": "/home/viat/VIAT/AUDIOS/campusislateja",
+                    "cementerios": "/home/viat/VIAT/AUDIOS/cementerios.wav",
+                    "cementerio parque los laureles": "/home/viat/VIAT/AUDIOS/cementeriolaureles.wav",
+                    "cementerio número uno": "/home/viat/VIAT/AUDIOS/cementerio1.wav",
+                    "cementerio número dos": "/home/viat/VIAT/AUDIOS/cementerio2.wav",
+                    "proceso": "/home/viat/VIAT/AUDIOS/proceso.wav",
+                    "visión asistida": "/home/viat/VIAT/AUDIOS/VIAT.wav",
+                    "ayuda": "/home/viat/VIAT/AUDIOS/ayuda.wav",
+                    "paradero": "/home/viat/VIAT/AUDIOS/paraderoplaza.wav",
+                    "y formación": "/home/viat/VIAT/AUDIOS/informacion.wav",
+                    "in formación": "/home/viat/VIAT/AUDIOS/informacion.wav",
+                    "recorrido uno": "/home/viat/VIAT/AUDIOS/recorrido_linea1.wav",
+                    "recorrido dos": "/home/viat/VIAT/AUDIOS/recorrido_linea2.wav",
+                    "recorrido tres": "/home/viat/VIAT/AUDIOS/recorrido_linea3.wav",
+                    "recorrido cuatro": "/home/viat/VIAT/AUDIOS/recorrido_linea4.wav",
+                    "recorrido cinco": "/home/viat/VIAT/AUDIOS/recorrido_linea5.wav",
+                    "recorrido nueve": "/home/viat/VIAT/AUDIOS/recorrido_linea9.wav",
+                    "recorrido once": "/home/viat/VIAT/AUDIOS/recorrido_linea11.wav",
+                    "recorrido veinte niebla": "/home/viat/VIAT/AUDIOS/recorrido_linea20niebla.wav",
+                    "recorrido veinte regional": "/home/viat/VIAT/AUDIOS/recorrido_linea20regional.wav",
+                    "recorrido veintidós": "/home/viat/VIAT/AUDIOS/recorrido_linea22.wav"
                 }
 
-                # Detectar la palabra clave
-                for palabra_clave, audio_path in palabra_clave_a_audio.items():
-                    if palabra_clave in text and not audio_reproduciendo:
-                        reproducir_audio(audio_path)
-                        break  # Para evitar múltiples reproducciones
-
+                # Detectar la palabra clave 
+                for palabra_clave, audio_path in palabra_clave_a_audio.items(): 
+                    if app.nfc_activado and not linea_confirmada:
+                        if palabra_clave in text and not audio_reproduciendo: 
+                            reproducir_audio(audio_path) 
+                            if app.temporizador_reset: 
+                               app.after_cancel(app.temporizador_reset) # Cancelar cualquier temporizador previo 
+                            app.temporizador_reset = app.after(180000, app.resetear_ciclo) # Iniciar el nuevo temporizado
+                            break 
+                            
                 if app.nfc_activado:  # Solo continúa si NFC está activado
                     if "línea veinte" in text or "micro veinte" in text and not audio_reproduciendo and not detected_once:
                         reproducir_audio(audio_seleccion_20)
                         confirmed = False
                         detected_once = True  # Marcar como detectado
-                        if app.temporizador_reset:
-                            app.after_cancel(app.temporizador_reset)  # Cancelar el temporizador anterior
-                        app.temporizador_reset = app.after(60000, app.resetear_ciclo)  # Reiniciar el temporizador
+                        if app.temporizador_reset: 
+                           app.after_cancel(app.temporizador_reset) # Cancelar cualquier temporizador previo 
+                        app.temporizador_reset = app.after(180000, app.resetear_ciclo) # Iniciar el nuevo temporizado
+                        
                         while not confirmed:
                             data = q.get()
                             if rec.AcceptWaveform(data):
@@ -258,25 +295,19 @@ def reconocer_voz():
                                     app.mostrar_linea("línea veinte regional")
                                     confirmed = True
                                     detected_once = False  # Resetear bandera
-                                    if app.temporizador_reset:
-                                        app.after_cancel(app.temporizador_reset)  # Cancelar el temporizador si existía
-                                    app.temporizador_reset = app.after(60000, app.resetear_ciclo)  # Reiniciar el temporizador   
-                                elif "no" in confirmacion and not audio_reproduciendo:
-                                    reproducir_audio(audio_repeticion)
-                                    confirmed = True
-                                    app.linea_label.configure(text="")
+                                    app.nfc_activado= False
+                                    if app.temporizador_reset: 
+                                       app.after_cancel(app.temporizador_reset) # Cancelar cualquier temporizador previo 
+                                    app.temporizador_reset = app.after(180000, app.resetear_ciclo) # Iniciar el nuevo temporizado
                                 elif "niebla" in confirmacion and not audio_reproduciendo:
                                     reproducir_audio(audios_lineas["línea veinte niebla"][1])
                                     app.mostrar_linea("línea veinte niebla")
                                     confirmed = True
                                     detected_once = False  # Resetear bandera
-                                    if app.temporizador_reset:
-                                        app.after_cancel(app.temporizador_reset)  # Cancelar el temporizador si existía
-                                    app.temporizador_reset = app.after(60000, app.resetear_ciclo)  # Reiniciar el temporizador
-                                else:
-                                    print("Confirmación no válida, repitiendo...")
-                                    reproducir_audio(audio_repeticion_seleccion)
-                                    confirmed = True
+                                    app.nfc_activado= False
+                                    if app.temporizador_reset: 
+                                       app.after_cancel(app.temporizador_reset) # Cancelar cualquier temporizador previo 
+                                    app.temporizador_reset = app.after(180000, app.resetear_ciclo) # Iniciar el nuevo temporizado
                     else:
                         linea_detectada = False
                         for linea, (ruta_audio, ruta_confirmacion) in audios_lineas.items():
@@ -285,11 +316,9 @@ def reconocer_voz():
                                 reproducir_audio(ruta_audio)
                                 confirmed = False
                                 detected_once = True  # Marcar como detectado
-
-                                if app.temporizador_reset:
-                                    app.after_cancel(app.temporizador_reset)  # Cancelar el temporizador anterior
-                                app.temporizador_reset = app.after(60000, app.resetear_ciclo)  # Reiniciar el temporizador
-
+                                if app.temporizador_reset: 
+                                   app.after_cancel(app.temporizador_reset) # Cancelar cualquier temporizador previo 
+                                app.temporizador_reset = app.after(180000, app.resetear_ciclo) # Iniciar el nuevo temporizado
                                 while not confirmed:
                                     data = q.get()
                                     if rec.AcceptWaveform(data):
@@ -302,9 +331,10 @@ def reconocer_voz():
                                             app.mostrar_linea(linea)
                                             confirmed = True
                                             detected_once = False  # Resetear bandera
-                                            if app.temporizador_reset:
-                                                app.after_cancel(app.temporizador_reset)  # Cancelar el temporizador si existía
-                                            app.temporizador_reset = app.after(60000, app.resetear_ciclo)  # Reiniciar el temporizador    
+                                            app.nfc_activado= False
+                                            if app.temporizador_reset: 
+                                               app.after_cancel(app.temporizador_reset) # Cancelar cualquier temporizador previo 
+                                            app.temporizador_reset = app.after(180000, app.resetear_ciclo) # Iniciar el nuevo temporizado
                                         elif "no" in confirmacion and not audio_reproduciendo:
                                             reproducir_audio(audio_repeticion)
                                             confirmed = True
@@ -316,16 +346,20 @@ def reconocer_voz():
 def leer_nfc():
     global app
     while True:
-        uid = nfc.read_passive_target(timeout=0.5)
-        if uid:
-            uid_hex = ''.join([f"{i:02X}" for i in uid])
-            print("Tarjeta NFC detectada con UID:", uid_hex)
+        try:
+            uid = nfc.read_passive_target(timeout=2)
+            if uid:
+                uid_hex = ''.join([f"{i:02X}" for i in uid])
+                print("Tarjeta NFC detectada con UID:", uid_hex)
             
-            if uid_hex in uids_permitidos:
-                print("Acceso permitido")
-                app.activar_por_nfc()
-            else:
-                print("Acceso denegado")
+                if uid_hex in uids_permitidos:
+                    print("Acceso permitido")
+                    app.activar_por_nfc()
+                else:
+                    print("Acceso denegado")
+        except RuntimeError as e: 
+            print(f"Error al leer NFC: {e}") 
+            time.sleep(2) # Incrementar el retraso antes de reintentar a 2 segundos
 
 # Crear un socket
 def iniciar_socket():
@@ -360,8 +394,7 @@ def iniciar_socket():
                             if os.path.exists(audio_path):
                                 print(f"Reproduciendo audio para {line_name}")
                                 reproducir_audio(audio_path)
-                                app.after(60000, app.limpiar_pantalla)  # Limpia la pantalla después de 10 segundos del aviso
-                                app.after(60000, lambda: reproducir_audio("/home/viat/Desktop/AUDIOS_VIAT/gracias.wav"))  # Añadir aquí
+                                app.after(60000, app.resetear_ciclo)  # Limpia la pantalla después del aviso
                             else:
                                 print(f"Archivo de audio no encontrado: {audio_path}")
                     else:
