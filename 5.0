@@ -184,7 +184,7 @@ class App(ctk.CTk):
             self.after_cancel(self.temporizador_reset)  # Cancelar el temporizador si existía
 
     def activar_por_nfc(self):
-        global detected_once
+        global detected_once, linea_confirmada
         linea_confirmada = None
         detected_once = False # Reiniciar la detección
         self.nfc_activado = True
@@ -253,6 +253,7 @@ def reconocer_voz():
                     "paradero": "/home/viat/VIAT/AUDIOS/paraderoplaza.wav",
                     "y formación": "/home/viat/VIAT/AUDIOS/informacion.wav",
                     "in formación": "/home/viat/VIAT/AUDIOS/informacion.wav",
+                    "formación": "/home/viat/VIAT/AUDIOS/informacion.wav",
                     "recorrido uno": "/home/viat/VIAT/AUDIOS/recorrido_linea1.wav",
                     "recorrido dos": "/home/viat/VIAT/AUDIOS/recorrido_linea2.wav",
                     "recorrido tres": "/home/viat/VIAT/AUDIOS/recorrido_linea3.wav",
@@ -267,7 +268,7 @@ def reconocer_voz():
 
                 # Detectar la palabra clave 
                 for palabra_clave, audio_path in palabra_clave_a_audio.items(): 
-                    if app.nfc_activado and not linea_confirmada:
+                    if app.nfc_activado and not linea_confirmada and not detected_once:
                         if palabra_clave in text and not audio_reproduciendo: 
                             reproducir_audio(audio_path) 
                             if app.temporizador_reset: 
